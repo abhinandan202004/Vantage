@@ -6,8 +6,8 @@ pandas>=2.2,<3.0
 pandas-ta==0.4.71b0
 numpy>=1.26,<3.0
 scipy>=1.11
-yfinance==0.2.43
-nsepython==2.94
+yfinance==1.6.0
+nse[local]>=3.2.1
 python-dotenv==1.0.1
 httpx==0.27.2
 pydantic==2.9.2

@@ -1,41 +1,84 @@
 """
-Wraps `nsepython` to pull quote-level fundamentals (P/E, market cap,
-52-week range) and shareholding pattern from NSE's public (unofficial)
-JSON endpoints.
+Fetches quote-level fundamentals and shareholding pattern from NSE,
+via the actively-maintained `nse` library (pip install nse[local])
+rather than hand-rolling the anti-bot handshake ourselves.
 
-NSE requires a browser-like session (cookies + headers) before it will
-serve these endpoints — nsepython handles that internally. If NSE
-changes their anti-bot measures this is the piece most likely to break;
-wrap calls in try/except in production and fall back gracefully.
+WHY THIS LIBRARY (history of what didn't work): the original version
+of this file wrapped `nsepython`, which has a long history of breaking
+whenever NSE tightens its anti-bot checks. A hand-rolled httpx-based
+replacement still got a 403 (NSE fingerprints the TLS handshake, not
+just headers). A curl_cffi-based version with browser TLS impersonation
+got past the 403, but the shareholding endpoint URL/params used were
+wrong, returning a "missing index" error. Rather than keep guessing at
+NSE's exact handshake requirements, this switches to `nse` — a
+maintained, documented library (bennythadikaran.github.io/NseIndiaApi)
+that handles cookie persistence, session bootstrap, and rate-limiting
+internally, and has known-correct endpoint/parameter mappings.
+
+IMPORTANT DATA LIMITATION (confirmed from the library's documented
+sample response, not a bug to fix): NSE's shareholding-pattern
+endpoint only reports a Promoter vs Public split
+(`pr_and_prgrp` / `public_val`) — it does NOT break "Public" down into
+FII vs DII at the per-stock level. That distinction matters for two
+checklist conditions (`fii_dii_increasing` in the Fundamental score,
+`fii_increasing`/`dii_increasing` in the Smart Money score) — those
+will stay None/unknown from this data source. Getting real per-stock
+FII/DII splits would need a different source (e.g. the full XBRL
+shareholding filing, which has finer sub-categories, or a paid data
+provider) — flagged as a known gap in the README rather than silently
+guessed at.
+
+IMPORTANT: I cannot verify this against a live NSE response from this
+sandbox (no network access to nseindia.com here) — this is the third
+attempt at this problem, each based on solid reasoning from what the
+previous attempt's actual failure told us, but genuinely untested
+end-to-end. Run `python -m app.data_ingestion.nse_client RELIANCE` and
+report back what happens.
 """
-from nsepython import nsefetch
+from pathlib import Path
+from nse import NSE
 
-
-NSE_QUOTE_URL = "https://www.nseindia.com/api/quote-equity"
-NSE_SHAREHOLDING_URL = "https://www.nseindia.com/api/corporate-share-holdings-master"
+# Cookies get cached here between calls (the library's own mechanism) —
+# avoids re-bootstrapping a session on every single call.
+_CACHE_DIR = Path(__file__).parent / ".nse_cache"
+_CACHE_DIR.mkdir(exist_ok=True)
 
 
 def fetch_quote(symbol: str) -> dict:
     """
-    Returns raw NSE quote JSON for a symbol — includes priceInfo
-    (lastPrice, 52-week high/low) and some metadata. This is a good
-    source for real-time-ish price display, not for scoring (use
-    OHLCV history for that).
+    Returns NSE quote data for a symbol — current price, market depth,
+    OHLC, trading metrics. Good for real-time-ish price display, not
+    for scoring (use OHLCV history for that).
     """
-    return nsefetch(f"{NSE_QUOTE_URL}?symbol={symbol}")
+    with NSE(download_folder=_CACHE_DIR) as nse:
+        return nse.quote(symbol)
 
 
-def fetch_shareholding(symbol: str) -> dict:
+def fetch_shareholding(symbol: str) -> list[dict]:
     """
-    Returns raw shareholding pattern JSON for a symbol.
-    Caller is responsible for parsing out promoter/FII/DII percentages
-    since NSE's response shape varies by filing period.
+    Returns a list of quarterly shareholding records for a symbol,
+    most recent quarter first. Each record includes (per the library's
+    documented response shape):
+        symbol, date, pr_and_prgrp (promoter+group %), public_val
+        (public %), employeeTrusts, and filing metadata.
+
+    NOTE: no FII/DII split is available here — see module docstring.
     """
-    return nsefetch(f"{NSE_SHAREHOLDING_URL}?symbol={symbol}")
+    with NSE(download_folder=_CACHE_DIR) as nse:
+        return nse.shareholding(symbol)
 
 
 if __name__ == "__main__":
     import sys
     import json
     sym = sys.argv[1] if len(sys.argv) > 1 else "RELIANCE"
-    print(json.dumps(fetch_quote(sym), indent=2)[:1000])
+    print(f"--- quote for {sym} ---")
+    try:
+        print(json.dumps(fetch_quote(sym), indent=2)[:1500])
+    except Exception as e:
+        print(f"FAILED: {e}")
+    print(f"\n--- shareholding for {sym} ---")
+    try:
+        print(json.dumps(fetch_shareholding(sym), indent=2)[:1500])
+    except Exception as e:
+        print(f"FAILED: {e}")

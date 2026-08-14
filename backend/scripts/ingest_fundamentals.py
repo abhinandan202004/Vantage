@@ -67,23 +67,18 @@ def ingest_shareholding_for(db, symbol: str) -> None:
     stock = _get_or_create_stock(db, symbol)
 
     try:
-        raw = fetch_shareholding(symbol)
+        records = fetch_shareholding(symbol)
     except Exception as e:
         print(f"  [shareholding] {symbol}: FAILED — {e}")
         return
 
-    # NSE's shareholding response shape varies by filing period and has
-    # changed over the years — this parsing is a best-effort based on
-    # the commonly-seen structure and WILL need adjustment once you can
-    # inspect a live response. Run with a print(raw) here the first time
-    # to see the actual shape before trusting this blindly.
-    records = raw.get("data", []) if isinstance(raw, dict) else []
     if not records:
-        print(f"  [shareholding] {symbol}: no records in response (check raw shape — API may have changed)")
+        print(f"  [shareholding] {symbol}: no records returned")
         return
 
     for rec in records:
         try:
+            # nse library's documented date format: "31-DEC-2025"
             period_end_date = datetime.strptime(rec["date"], "%d-%b-%Y").date()
         except (KeyError, ValueError):
             continue
@@ -93,15 +88,30 @@ def ingest_shareholding_for(db, symbol: str) -> None:
         ).first()
         row = existing or Shareholding(stock_id=stock.id, period_end=period_end_date)
 
-        row.promoter_pct = rec.get("promoter")
-        row.fii_pct = rec.get("fii")
-        row.dii_pct = rec.get("dii")
-        row.public_pct = rec.get("public")
+        def _to_float(val):
+            try:
+                return float(val) if val not in (None, "", "-") else None
+            except ValueError:
+                return None
+
+        row.promoter_pct = _to_float(rec.get("pr_and_prgrp"))
+        row.public_pct = _to_float(rec.get("public_val"))
+        # NSE's shareholding-pattern endpoint reports Promoter vs Public
+        # only — it does NOT break Public down into FII/DII at the
+        # per-stock level (confirmed from the nse library's documented
+        # sample response). Leaving these None (not guessed/zeroed) is
+        # correct — the scoring functions already treat None as
+        # "not yet computed" rather than "failed". A real per-stock
+        # FII/DII split would need a different data source (full XBRL
+        # filing, or a paid provider) — see README.
+        row.fii_pct = None
+        row.dii_pct = None
 
         if not existing:
             db.add(row)
 
-    print(f"  [shareholding] {symbol}: processed {len(records)} quarter(s)")
+    print(f"  [shareholding] {symbol}: processed {len(records)} quarter(s) "
+          f"(promoter/public only — no FII/DII split available from this endpoint)")
 
 
 def main(symbols: list[str]) -> None:

@@ -71,6 +71,8 @@ class Fundamental(Base):
     roce = Column(Float)
     pe_ratio = Column(Float)
     peg_ratio = Column(Float)
+    sales_cagr_pct = Column(Float)
+    profit_cagr_pct = Column(Float)
 
     stock = relationship("Stock", back_populates="fundamentals")
 

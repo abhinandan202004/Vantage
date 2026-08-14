@@ -13,6 +13,7 @@ results against screener.in manually before trusting this at scale —
 I can't verify accuracy against real filings from this sandbox.
 """
 from dataclasses import dataclass
+import math
 import yfinance as yf
 
 from app.data_ingestion.yfinance_client import _to_yahoo_symbol
@@ -36,9 +37,11 @@ class FundamentalSnapshot:
 
 
 def _cagr(oldest: float, newest: float, years: float) -> float | None:
-    """% CAGR between two values `years` apart. None if inputs are unusable
-    (non-positive base, zero years, etc.) rather than raising — this is a
-    background job over many symbols and one bad statement shouldn't crash it."""
+    """% CAGR between two values `years` apart. None if inputs are
+    unusable (missing, non-positive base, zero years, etc.) rather than
+    raising — this is a background job over many symbols and one bad
+    statement shouldn't crash it. Assumes NaN has already been converted
+    to None upstream via _clean()."""
     if oldest is None or newest is None or oldest <= 0 or years <= 0:
         return None
     return round((((newest / oldest) ** (1 / years)) - 1) * 100, 2)
@@ -68,6 +71,19 @@ def fetch_fundamentals(symbol: str) -> FundamentalSnapshot:
                 return df.loc[label]
         return None
 
+    def _clean(val):
+        """Converts pandas NaN (a float, not Python None) to None.
+        Missing statement cells come through as NaN, and NaN silently
+        passes truthy/comparison checks (`nan is None` is False,
+        `bool(nan)` is True) — every extracted value goes through this
+        before any arithmetic, so a missing cell can never poison a
+        ratio calculation downstream."""
+        if val is None:
+            return None
+        if isinstance(val, float) and math.isnan(val):
+            return None
+        return val
+
     sales_row = _row(financials, "Total Revenue", "TotalRevenue")
     profit_row = _row(financials, "Net Income", "NetIncome")
     ocf_row = _row(cashflow, "Operating Cash Flow", "Cash Flow From Continuing Operating Activities")
@@ -77,16 +93,16 @@ def fetch_fundamentals(symbol: str) -> FundamentalSnapshot:
     total_assets_row = _row(balance_sheet, "Total Assets")
     current_liab_row = _row(balance_sheet, "Current Liabilities")
 
-    sales_latest = sales_row.iloc[0] if sales_row is not None and len(sales_row) > 0 else None
-    sales_oldest = sales_row.iloc[-1] if sales_row is not None and len(sales_row) > 1 else None
-    profit_latest = profit_row.iloc[0] if profit_row is not None and len(profit_row) > 0 else None
-    profit_oldest = profit_row.iloc[-1] if profit_row is not None and len(profit_row) > 1 else None
-    ocf_latest = ocf_row.iloc[0] if ocf_row is not None and len(ocf_row) > 0 else None
-    debt_latest = debt_row.iloc[0] if debt_row is not None and len(debt_row) > 0 else None
-    equity_latest = equity_row.iloc[0] if equity_row is not None and len(equity_row) > 0 else None
-    ebit_latest = ebit_row.iloc[0] if ebit_row is not None and len(ebit_row) > 0 else None
-    total_assets_latest = total_assets_row.iloc[0] if total_assets_row is not None and len(total_assets_row) > 0 else None
-    current_liab_latest = current_liab_row.iloc[0] if current_liab_row is not None and len(current_liab_row) > 0 else None
+    sales_latest = _clean(sales_row.iloc[0]) if sales_row is not None and len(sales_row) > 0 else None
+    sales_oldest = _clean(sales_row.iloc[-1]) if sales_row is not None and len(sales_row) > 1 else None
+    profit_latest = _clean(profit_row.iloc[0]) if profit_row is not None and len(profit_row) > 0 else None
+    profit_oldest = _clean(profit_row.iloc[-1]) if profit_row is not None and len(profit_row) > 1 else None
+    ocf_latest = _clean(ocf_row.iloc[0]) if ocf_row is not None and len(ocf_row) > 0 else None
+    debt_latest = _clean(debt_row.iloc[0]) if debt_row is not None and len(debt_row) > 0 else None
+    equity_latest = _clean(equity_row.iloc[0]) if equity_row is not None and len(equity_row) > 0 else None
+    ebit_latest = _clean(ebit_row.iloc[0]) if ebit_row is not None and len(ebit_row) > 0 else None
+    total_assets_latest = _clean(total_assets_row.iloc[0]) if total_assets_row is not None and len(total_assets_row) > 0 else None
+    current_liab_latest = _clean(current_liab_row.iloc[0]) if current_liab_row is not None and len(current_liab_row) > 0 else None
 
     years_span = (len(sales_row) - 1) if sales_row is not None else 0
 
