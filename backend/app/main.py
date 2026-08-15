@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import stock
+from app.routers import stock, chat
 
 app = FastAPI(title="Stock Screener API", version="0.1.0")
 
@@ -13,6 +13,7 @@ app.add_middleware(
 )
 
 app.include_router(stock.router)
+app.include_router(chat.router)
 
 
 @app.get("/health")

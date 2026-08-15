@@ -1,6 +1,6 @@
 from sqlalchemy import (
     Column, Integer, String, Float, Date, DateTime, ForeignKey, BigInteger,
-    UniqueConstraint, func
+    UniqueConstraint, JSON, func
 )
 from sqlalchemy.orm import relationship
 
@@ -118,3 +118,37 @@ class Score(Base):
     computed_at = Column(DateTime, server_default=func.now())
 
     stock = relationship("Stock", back_populates="scores")
+
+
+class DocumentChunk(Base):
+    """
+    One row per chunk of an ingested document, for RAG retrieval.
+
+    Embeddings are stored as a plain JSON array of floats rather than
+    using pgvector — deliberately avoids that extra native-compiled
+    Postgres extension (which needs Visual Studio's C++ toolchain to
+    build on Windows). Similarity search is brute-force cosine
+    similarity in Python (see app/rag/store.py) — perfectly fine at
+    the document volumes a personal project will have; revisit only
+    if the corpus grows into the tens of thousands of chunks.
+
+    `source_type` distinguishes what kind of content this chunk came
+    from, so retrieval can filter by it (e.g. "only search this
+    stock's own filings, not the general glossary").
+    """
+    __tablename__ = "document_chunks"
+
+    id = Column(Integer, primary_key=True)
+    source_type = Column(String(32), nullable=False, index=True)
+    # "company_filing" | "general_knowledge" | "project_methodology"
+    stock_id = Column(Integer, ForeignKey("stocks.id"), nullable=True, index=True)
+    # null for source_type in (general_knowledge, project_methodology) — those aren't stock-specific
+
+    title = Column(String(256))          # e.g. "RELIANCE Annual Report FY2026"
+    source_url = Column(String(512))     # where this content came from, for citation/debugging
+    content = Column(String, nullable=False)  # the chunk's raw text
+    embedding = Column(JSON, nullable=False)  # list[float], length == EMBEDDING_DIM (see rag/embeddings.py)
+
+    created_at = Column(DateTime, server_default=func.now())
+
+    stock = relationship("Stock")
