@@ -34,6 +34,7 @@ class FundamentalSnapshot:
     sales_cagr_pct: float | None = None
     profit_cagr_pct: float | None = None
     debt_to_equity: float | None = None
+    earnings_growth_trend: str | None = None  # "accelerating" | "decelerating" | "flat"
 
 
 def _cagr(oldest: float, newest: float, years: float) -> float | None:
@@ -45,6 +46,54 @@ def _cagr(oldest: float, newest: float, years: float) -> float | None:
     if oldest is None or newest is None or oldest <= 0 or years <= 0:
         return None
     return round((((newest / oldest) ** (1 / years)) - 1) * 100, 2)
+
+
+def _earnings_growth_trend(profit_row, clean_fn) -> str | None:
+    """
+    Compares the most recent year-over-year profit growth rate against
+    the prior year's growth rate to determine whether earnings growth
+    is speeding up or slowing down — the checklist's "Accelerating
+    Earnings Growth" condition needs this comparison, not just a
+    single CAGR figure (CAGR averages growth across the whole period
+    and can't tell you if the trend is improving or worsening within
+    it).
+
+    Needs at least 3 annual profit figures (2 consecutive YoY growth
+    rates to compare) — returns None if there isn't enough clean
+    history, same "insufficient data" treatment as everywhere else in
+    this file, rather than guessing from 2 data points.
+
+    profit_row: pandas Series, most recent period first (yfinance's
+    default column order). clean_fn: the caller's NaN-to-None cleaner,
+    reused here so this function doesn't duplicate that logic.
+    """
+    if profit_row is None or len(profit_row) < 3:
+        return None
+
+    values = [clean_fn(v) for v in profit_row.iloc[:3]]  # [latest, 1yr_prior, 2yr_prior]
+    latest, prior, two_prior = values
+
+    if latest is None or prior is None or two_prior is None:
+        return None
+    if prior <= 0 or two_prior <= 0:
+        # growth-rate math on a loss-making base period isn't
+        # meaningful (e.g. going from a loss to a profit isn't a
+        # sensible "% growth rate") — stay honest and return None
+        # rather than produce a distorted comparison.
+        return None
+
+    recent_growth_rate = (latest - prior) / prior
+    prior_growth_rate = (prior - two_prior) / two_prior
+
+    # A small tolerance band around "equal" avoids labeling trivial
+    # noise (e.g. 14.2% vs 14.4% growth) as a meaningful trend change.
+    TOLERANCE = 0.02  # 2 percentage points
+    if recent_growth_rate > prior_growth_rate + TOLERANCE:
+        return "accelerating"
+    elif recent_growth_rate < prior_growth_rate - TOLERANCE:
+        return "decelerating"
+    else:
+        return "flat"
 
 
 def fetch_fundamentals(symbol: str) -> FundamentalSnapshot:
@@ -118,6 +167,8 @@ def fetch_fundamentals(symbol: str) -> FundamentalSnapshot:
 
     debt_to_equity = round(debt_latest / equity_latest, 2) if debt_latest and equity_latest else None
 
+    earnings_growth_trend = _earnings_growth_trend(profit_row, _clean)
+
     return FundamentalSnapshot(
         period_end=period_end,
         sales=sales_latest,
@@ -132,6 +183,7 @@ def fetch_fundamentals(symbol: str) -> FundamentalSnapshot:
         sales_cagr_pct=_cagr(sales_oldest, sales_latest, years_span),
         profit_cagr_pct=_cagr(profit_oldest, profit_latest, years_span),
         debt_to_equity=debt_to_equity,
+        earnings_growth_trend=earnings_growth_trend,
     )
 
 

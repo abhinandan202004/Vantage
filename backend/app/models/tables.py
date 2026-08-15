@@ -73,6 +73,7 @@ class Fundamental(Base):
     peg_ratio = Column(Float)
     sales_cagr_pct = Column(Float)
     profit_cagr_pct = Column(Float)
+    earnings_growth_trend = Column(String(16))  # "accelerating" | "decelerating" | "flat"
 
     stock = relationship("Stock", back_populates="fundamentals")
 

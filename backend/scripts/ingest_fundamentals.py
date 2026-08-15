@@ -56,11 +56,15 @@ def ingest_fundamentals_for(db, symbol: str) -> None:
     row.roce = snap.roce
     row.pe_ratio = snap.pe_ratio
     row.peg_ratio = snap.peg_ratio
+    row.sales_cagr_pct = snap.sales_cagr_pct
+    row.profit_cagr_pct = snap.profit_cagr_pct
+    row.earnings_growth_trend = snap.earnings_growth_trend
 
     if not existing:
         db.add(row)
     print(f"  [fundamentals] {symbol}: OK (period_end={snap.period_end}, "
-          f"ROE={snap.roe}, ROCE={snap.roce}, sales_cagr={snap.sales_cagr_pct}%)")
+          f"ROE={snap.roe}, ROCE={snap.roce}, sales_cagr={snap.sales_cagr_pct}%, "
+          f"earnings_growth_trend={snap.earnings_growth_trend})")
 
 
 def ingest_shareholding_for(db, symbol: str) -> None:

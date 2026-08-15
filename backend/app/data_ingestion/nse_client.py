@@ -68,6 +68,26 @@ def fetch_shareholding(symbol: str) -> list[dict]:
         return nse.shareholding(symbol)
 
 
+def fetch_delivery_pct(symbol: str) -> float | None:
+    """
+    Returns the day's delivery-to-traded-quantity percentage for a
+    symbol — the share of traded volume that resulted in actual
+    delivery (vs. intraday square-off), a common proxy for "real"
+    investor participation vs. speculative/day-trading volume.
+
+    Confirmed live field: NSE's quote-equity response includes this
+    under tradeInfo.deliveryToTradedQuantity (seen directly in a real
+    RELIANCE quote during this project — no guessing involved).
+    Returns None if the field is missing from the response (e.g. for
+    a symbol/segment where NSE doesn't report it).
+    """
+    quote = fetch_quote(symbol)
+    trade_info = quote.get("tradeInfo") if isinstance(quote, dict) else None
+    if not trade_info:
+        return None
+    return trade_info.get("deliveryToTradedQuantity")
+
+
 if __name__ == "__main__":
     import sys
     import json
