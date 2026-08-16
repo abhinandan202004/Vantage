@@ -59,6 +59,7 @@ def ingest_annual_reports(symbol: str, max_reports: int = 1) -> None:
 
     db = SessionLocal()
     try:
+        print(f"  [filings] {symbol}: fetching filing list from NSE...")
         with NSE(download_folder=_CACHE_DIR) as nse:
             reports_by_year = nse.annual_reports(symbol)
             # print(reports_by_year)  # uncomment to inspect the real response shape
@@ -81,8 +82,12 @@ def ingest_annual_reports(symbol: str, max_reports: int = 1) -> None:
                     continue
 
                 try:
+                    print(f"  [filings] {symbol}: downloading {pdf_url} ...")
                     pdf_path = nse.download_document(pdf_url, folder=_FILINGS_DOWNLOAD_DIR)
+                    print(f"  [filings] {symbol}: downloaded, extracting text "
+                          f"(large reports can take a while here — pypdf reads page by page)...")
                     text = _extract_pdf_text(pdf_path)
+                    print(f"  [filings] {symbol}: extracted {len(text.split())} words from PDF")
                 except Exception as e:
                     print(f"  [filings] {symbol}: failed to download/extract {pdf_url}: {e}")
                     continue

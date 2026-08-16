@@ -32,6 +32,8 @@ def add_document(
     symbol: str | None = None,
     chunk_size_words: int = 250,
     overlap_words: int = 40,
+    embed_batch_size: int = 20,
+    verbose: bool = True,
 ) -> int:
     """
     Chunks `text`, embeds each chunk, and stores them as DocumentChunk
@@ -40,10 +42,20 @@ def add_document(
 
     Does NOT commit — caller controls the transaction, so a batch
     ingestion job can commit once at the end rather than per-document.
+
+    Embeds in batches of `embed_batch_size` (rather than one call over
+    every chunk) and prints progress between batches when verbose=True
+    — a long document (e.g. a 300-page annual report) can produce
+    hundreds of chunks, and without this, a slow embedding pass looks
+    identical to a genuinely hung process. Set verbose=False for
+    scripted/silent use.
     """
     chunks = chunk_text(text, chunk_size_words=chunk_size_words, overlap_words=overlap_words)
     if not chunks:
         return 0
+
+    if verbose:
+        print(f"    chunked into {len(chunks)} piece(s), embedding...")
 
     stock_id = None
     if symbol is not None:
@@ -54,17 +66,23 @@ def add_document(
             db.flush()
         stock_id = stock.id
 
-    embeddings = embed_texts(chunks)
+    for batch_start in range(0, len(chunks), embed_batch_size):
+        batch = chunks[batch_start:batch_start + embed_batch_size]
+        batch_embeddings = embed_texts(batch)
 
-    for chunk_content, embedding in zip(chunks, embeddings):
-        db.add(DocumentChunk(
-            source_type=source_type,
-            stock_id=stock_id,
-            title=title,
-            source_url=source_url,
-            content=chunk_content,
-            embedding=embedding,
-        ))
+        for chunk_content, embedding in zip(batch, batch_embeddings):
+            db.add(DocumentChunk(
+                source_type=source_type,
+                stock_id=stock_id,
+                title=title,
+                source_url=source_url,
+                content=chunk_content,
+                embedding=embedding,
+            ))
+
+        if verbose:
+            done = min(batch_start + embed_batch_size, len(chunks))
+            print(f"    embedded {done}/{len(chunks)} chunks")
 
     return len(chunks)
 
