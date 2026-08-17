@@ -1,9 +1,10 @@
 from datetime import date
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from sqlalchemy.orm import Session
 
 from app.data_ingestion.yfinance_client import fetch_ohlcv
 from app.services.stock_summary import compute_full_score
+from app.services.ingestion_trigger import ensure_fundamentals_ingested
 from app.schemas import OHLCVBar, StockScoreResponse, ScoreBreakdown, SmartMoneyBreakdown
 from app.config import settings
 from app.db import get_db
@@ -30,20 +31,25 @@ def get_ohlcv(symbol: str, lookback_days: int = settings.default_lookback_days):
 
 
 @router.get("/{symbol}/score", response_model=StockScoreResponse)
-def get_score(symbol: str, db: Session = Depends(get_db)):
+def get_score(symbol: str, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """
     Returns technical + fundamental + smart money scores for a symbol.
 
-    Fundamental and smart-money figures come from the DB
-    (`fundamentals` / `shareholding` tables) — run
-    `python -m scripts.ingest_fundamentals <SYMBOL>` first, or these
-    will still come back mostly None/placeholder for symbols that
-    haven't been ingested yet (which is expected, not a bug).
+    If this symbol has never had fundamentals/shareholding data
+    ingested, this endpoint automatically schedules that ingestion in
+    the background (see app/services/ingestion_trigger.py) and
+    returns immediately with whatever's available right now — the
+    technical score is always live, but fundamental/smart_money will
+    be mostly null on this first request. `fundamentals_status` in
+    the response tells the frontend whether to show a "still
+    loading fundamentals" indicator and poll again shortly.
     """
     try:
         result = compute_full_score(symbol, db)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+    fundamentals_status = ensure_fundamentals_ingested(symbol, db, background_tasks)
 
     return StockScoreResponse(
         symbol=symbol,
@@ -54,4 +60,5 @@ def get_score(symbol: str, db: Session = Depends(get_db)):
             score=result.smart_money.score, interpretation=result.smart_money.interpretation,
             max_possible=result.smart_money.max_possible, breakdown=result.smart_money.breakdown,
         ),
+        fundamentals_status=fundamentals_status,
     )

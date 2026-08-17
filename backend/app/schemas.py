@@ -29,3 +29,4 @@ class StockScoreResponse(BaseModel):
     technical: ScoreBreakdown
     fundamental: ScoreBreakdown
     smart_money: SmartMoneyBreakdown
+    fundamentals_status: str  # "available" | "in_progress" — see app/services/ingestion_trigger.py

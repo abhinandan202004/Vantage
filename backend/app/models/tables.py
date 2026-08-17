@@ -152,3 +152,44 @@ class DocumentChunk(Base):
     created_at = Column(DateTime, server_default=func.now())
 
     stock = relationship("Stock")
+
+
+class User(Base):
+    """
+    A registered user of the app. Password is stored as a PBKDF2-SHA256
+    hash + per-user random salt (see app/auth/security.py) — never the
+    plain password.
+    """
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True)
+    email = Column(String(256), unique=True, nullable=False, index=True)
+    password_hash = Column(String(256), nullable=False)
+    password_salt = Column(String(64), nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+
+    holdings = relationship("PortfolioHolding", back_populates="user", cascade="all, delete-orphan")
+
+
+class PortfolioHolding(Base):
+    """
+    One row per position a user has added to their portfolio —
+    a stock, how many shares, and what they paid (optional, since a
+    user might just want to track a watchlist-style holding without
+    recording purchase details).
+    """
+    __tablename__ = "portfolio_holdings"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    stock_id = Column(Integer, ForeignKey("stocks.id"), nullable=False, index=True)
+
+    quantity = Column(Float, nullable=False)
+    buy_price = Column(Float)   # nullable — optional
+    buy_date = Column(Date)     # nullable — optional
+    notes = Column(String(512))
+
+    created_at = Column(DateTime, server_default=func.now())
+
+    user = relationship("User", back_populates="holdings")
+    stock = relationship("Stock")
